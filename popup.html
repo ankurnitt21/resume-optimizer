@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resume Optimizer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Header -->
+      <header>
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="2" width="18" height="20" rx="2" stroke="#4F46E5" stroke-width="2" />
+            <line x1="7" y1="7" x2="17" y2="7" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" />
+            <line x1="7" y1="11" x2="17" y2="11" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" />
+            <line x1="7" y1="15" x2="13" y2="15" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <h1>Resume Optimizer</h1>
+        </div>
+      </header>
+
+      <!-- Tab Navigation -->
+      <nav class="tabs">
+        <button class="tab active" data-tab="optimize">Optimize</button>
+        <button class="tab" data-tab="resume">My Resume</button>
+        <button class="tab" data-tab="settings">Settings</button>
+      </nav>
+
+      <!-- Optimize Tab -->
+      <section id="tab-optimize" class="tab-content active">
+        <div id="status-bar" class="status-bar hidden">
+          <div class="status-icon"></div>
+          <span class="status-text"></span>
+        </div>
+
+        <div id="step-extract" class="step">
+          <div class="step-header">
+            <span class="step-number">1</span>
+            <span class="step-title">Extract Job Description</span>
+          </div>
+          <p class="step-desc">Reads the job posting from the current webpage.</p>
+          <button id="btn-extract" class="btn btn-primary">
+            <span class="btn-text">Extract from Page</span>
+            <span class="spinner hidden"></span>
+          </button>
+          <div id="jd-preview" class="preview hidden">
+            <div class="preview-header">
+              <strong>Extracted Job Description</strong>
+              <button id="btn-edit-jd" class="btn-link">Edit</button>
+            </div>
+            <textarea id="jd-text" rows="4" readonly></textarea>
+          </div>
+        </div>
+
+        <div id="step-reframe" class="step disabled">
+          <div class="step-header">
+            <span class="step-number">2</span>
+            <span class="step-title">Reframe Resume</span>
+          </div>
+          <p class="step-desc">AI tailors your resume to match this job posting.</p>
+          <button id="btn-reframe" class="btn btn-primary" disabled>
+            <span class="btn-text">Optimize Resume</span>
+            <span class="spinner hidden"></span>
+          </button>
+        </div>
+
+        <div id="step-download" class="step disabled">
+          <div class="step-header">
+            <span class="step-number">3</span>
+            <span class="step-title">Download PDF</span>
+          </div>
+          <p class="step-desc">Your tailored resume is ready.</p>
+          <button id="btn-download" class="btn btn-success" disabled>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="margin-right: 6px">
+              <path
+                d="M8 1v10M8 11l-3-3M8 11l3-3M2 13h12"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round" />
+            </svg>
+            <span class="btn-text">Download PDF</span>
+          </button>
+          <button id="btn-preview-latex" class="btn btn-outline" disabled>View LaTeX Source</button>
+        </div>
+
+        <!-- LaTeX Preview Modal -->
+        <div id="latex-modal" class="modal hidden">
+          <div class="modal-content">
+            <div class="modal-header">
+              <strong>LaTeX Source</strong>
+              <button id="btn-close-modal" class="btn-link">Close</button>
+            </div>
+            <textarea id="latex-source" rows="12" readonly></textarea>
+            <button id="btn-copy-latex" class="btn btn-outline" style="margin-top: 8px">Copy to Clipboard</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Resume Tab -->
+      <section id="tab-resume" class="tab-content">
+        <div class="form-group">
+          <label for="resume-name">Full Name</label>
+          <input type="text" id="resume-name" placeholder="John Doe" />
+        </div>
+        <div class="form-group">
+          <label for="resume-email">Email</label>
+          <input type="email" id="resume-email" placeholder="john@example.com" />
+        </div>
+        <div class="form-group">
+          <label for="resume-phone">Phone</label>
+          <input type="tel" id="resume-phone" placeholder="+1 (555) 123-4567" />
+        </div>
+        <div class="form-group">
+          <label for="resume-location">Location</label>
+          <input type="text" id="resume-location" placeholder="San Francisco, CA" />
+        </div>
+        <div class="form-group">
+          <label for="resume-linkedin">LinkedIn URL</label>
+          <input type="url" id="resume-linkedin" placeholder="https://linkedin.com/in/johndoe" />
+        </div>
+        <div class="form-group">
+          <label for="resume-summary">Professional Summary</label>
+          <textarea
+            id="resume-summary"
+            rows="3"
+            placeholder="Experienced software engineer with 5+ years..."></textarea>
+        </div>
+
+        <!-- Experience -->
+        <div class="section-header">
+          <h3>Work Experience</h3>
+          <button id="btn-add-exp" class="btn-link">+ Add</button>
+        </div>
+        <div id="experience-list"></div>
+
+        <!-- Education -->
+        <div class="section-header">
+          <h3>Education</h3>
+          <button id="btn-add-edu" class="btn-link">+ Add</button>
+        </div>
+        <div id="education-list"></div>
+
+        <!-- Skills -->
+        <div class="form-group">
+          <label for="resume-skills">Skills (comma-separated)</label>
+          <textarea id="resume-skills" rows="3" placeholder="Python, JavaScript, React, AWS, Docker, SQL..."></textarea>
+        </div>
+
+        <!-- Upload / Save -->
+        <div class="btn-group">
+          <button id="btn-save-resume" class="btn btn-primary">Save Resume</button>
+          <label class="btn btn-outline upload-label">
+            Import JSON
+            <input type="file" id="btn-import-resume" accept=".json" hidden />
+          </label>
+          <button id="btn-export-resume" class="btn btn-outline">Export JSON</button>
+        </div>
+        <div id="resume-status" class="status-bar hidden"></div>
+      </section>
+
+      <!-- Settings Tab -->
+      <section id="tab-settings" class="tab-content">
+        <div class="form-group">
+          <label for="api-key">OpenAI API Key</label>
+          <div class="input-group">
+            <input type="password" id="api-key" placeholder="sk-..." />
+            <button id="btn-toggle-key" class="btn-icon" title="Show/Hide">👁</button>
+          </div>
+          <p class="helper-text">Your key is stored locally and never sent anywhere except OpenAI.</p>
+        </div>
+        <div class="form-group">
+          <label for="model-select">Model</label>
+          <select id="model-select">
+            <option value="gpt-4o-mini" selected>GPT-4o Mini (fast, affordable)</option>
+            <option value="gpt-4o">GPT-4o (higher quality)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="page-limit">Resume Page Limit</label>
+          <select id="page-limit">
+            <option value="1" selected>1 Page</option>
+            <option value="2">2 Pages</option>
+          </select>
+        </div>
+        <div class="btn-group">
+          <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+        <div id="settings-status" class="status-bar hidden"></div>
+
+        <div class="rate-limit-info">
+          <h4>Rate Limiting</h4>
+          <p>Maximum 10 API calls per hour to prevent excessive usage.</p>
+          <p id="rate-limit-count">Calls this hour: 0 / 10</p>
+        </div>
+      </section>
+    </div>
+
+    <script src="libs/jspdf.umd.min.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
