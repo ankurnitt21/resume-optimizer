@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Resume Optimizer",
   "version": "1.0.0",
-  "description": "Automatically reframes your resume to match job descriptions using AI. Extract job postings, optimize your resume, and download a tailored PDF in seconds.",
+  "description": "Calculate job match score by comparing job descriptions with your resume using AI.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://api.openai.com/*"],
   "action": {
