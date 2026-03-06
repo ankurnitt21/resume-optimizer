@@ -6,6 +6,7 @@
 let extractedJD = '';
 let matchScore = null;
 let jobPageUrl = '';
+let matchGaps = [];
 
 // ---- DOM refs -----------------------------------------------
 const $ = (s) => document.querySelector(s);
@@ -44,11 +45,14 @@ function initOptimizeTab() {
     extractedJD = '';
     matchScore = null;
     jobPageUrl = '';
+    matchGaps = [];
     $('#score-section').classList.add('hidden');
     $('#outreach-section').classList.add('hidden');
     $('#start-section').classList.remove('hidden');
     $('#status-bar').classList.add('hidden');
     $('#btn-optimize').classList.add('hidden');
+    const latexEl = $('#latex-source');
+    if (latexEl) latexEl.value = '';
   });
 }
 
@@ -121,6 +125,9 @@ async function handleStart() {
       });
       detailsHTML += `</ul></div>`;
     }
+
+    // Persist gaps so they can be used during resume optimization (PART A)
+    matchGaps = Array.isArray(gaps) ? gaps : [];
 
     if (justification) {
       detailsHTML += `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;"><strong style="color: #4F46E5;">Why ${matchScore}%?</strong><div style="margin-top: 6px; color: #64748b;">${justification}</div></div>`;
@@ -195,6 +202,7 @@ async function handleOptimizeAndOutreach() {
       data: {
         jobDescription: extractedJD,
         jobUrl: jobPageUrl,
+        gaps: matchGaps || [],
         model: settings.model || 'gpt-4o-mini',
         apiKey: settings.apiKey
       }
@@ -202,9 +210,9 @@ async function handleOptimizeAndOutreach() {
 
     if (!result?.success) throw new Error(result?.error || 'Optimization failed');
 
-    downloadTexFile(result.latex, 'resume.tex');
+    renderResumeLatex(result.latex || '');
     renderOutreach(result);
-    showStatus('success', 'Resume downloaded & outreach messages ready!');
+    showStatus('success', 'Resume LaTeX ready & outreach messages generated!');
   } catch (err) {
     showStatus('error', err.message);
   } finally {
@@ -212,16 +220,11 @@ async function handleOptimizeAndOutreach() {
   }
 }
 
-function downloadTexFile(content, filename) {
-  const blob = new Blob([content], { type: 'application/x-tex' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+function renderResumeLatex(latex) {
+  $('#outreach-section').classList.remove('hidden');
+  const el = $('#latex-source');
+  if (!el) return;
+  el.value = latex;
 }
 
 function renderOutreach({ coldEmail, recruiterMsg, hiringManagerMsg }) {
@@ -234,8 +237,9 @@ function renderOutreach({ coldEmail, recruiterMsg, hiringManagerMsg }) {
   $$('.btn-copy').forEach((btn) => {
     btn.onclick = () => {
       const target = btn.dataset.target;
-      const text = $(`#${target}`).textContent;
-      navigator.clipboard.writeText(text).then(() => {
+      const node = $(`#${target}`);
+      const text = node ? (typeof node.value === 'string' ? node.value : node.textContent) : '';
+      navigator.clipboard.writeText(text || '').then(() => {
         const orig = btn.textContent;
         btn.textContent = 'Copied!';
         setTimeout(() => {

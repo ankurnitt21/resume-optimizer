@@ -1,11 +1,14 @@
 // ============================================================
-// Resume Optimizer – Background Service Worker
-// Handles OpenAI API calls for job match score calculation.
+// Resume Optimizer — Background Service Worker
 // ============================================================
 
-// ---- Original resume content (used for match score calculation) ----
+const DEFAULT_MODEL = 'gpt-4o-mini';
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
-const MY_WORK_EXPERIENCE = `Role 1 — Software Engineer, Warehouse Automation Client | Fastenal India (10/2024 – Present)
+// ── Candidate Profile ────────────────────────────────────────
+const CANDIDATE = {
+  name: 'Ankur Rana',
+  experience: `Role 1 — Software Engineer, Warehouse Automation Client | Fastenal India (10/2024 – Present)
 • Designed event-driven microservices using Java, Spring Boot, and Apache Kafka, processing 50K+ daily order events and improving scalability by 40%
 • Built asynchronous workflows for inventory validation, health monitoring, and audit logging, reducing order fulfillment latency by 30%
 • Integrated backend services with warehouse automation systems (ASRS, conveyors, packing units), reducing retrieval failures by 25%
@@ -18,246 +21,380 @@ Role 2 — Software Developer, Code Migration Suite | Fastenal India (01/2021 �
 • Migrated legacy WMS modules to Java 17 and Spring MVC, improving system response time by 25%
 • Designed modular RESTful APIs using Spring MVC, Hibernate, and DAO patterns for better separation of concerns
 • Implemented data persistence using Spring Data JPA and Hibernate, optimizing entity mappings and query performance
-• Implemented Spring AOP to unify application-wide logging, monitoring, and exception handling, enhancing maintainability and improving consistency across microservices and backend modules.
+• Implemented Spring AOP to unify application-wide logging, monitoring, and exception handling, enhancing maintainability and improving consistency across microservices and backend modules
 • Integrated Jenkins-based CI/CD pipelines for automated build, testing, and artifact management
 • Optimized complex SQL queries and improved execution paths, reducing overall database latency
 • Standardized application logging and monitoring using the ELK Stack
-• Dockerized applications to enable scalable, container-based deployments`;
+• Dockerized applications to enable scalable, container-based deployments`,
 
-const MY_SKILLS = `Languages: Java, C/C++, Python, SQL
-Frameworks & Tools: Spring Boot, Spring MVC, Spring Data JPA, Hibernate, Spring AOP, REST APIs, Apache Kafka, MySQL, PostgreSQL, Jenkins (CI/CD), ELK Stack, Github, Docker`;
+  skills: {
+    languages: 'Java, C/C++, Python, SQL',
+    frameworks: 'Spring Boot, Spring MVC, Spring Data JPA, Hibernate, Spring AOP, REST APIs, Apache Kafka, MySQL, PostgreSQL, Jenkins, ELK Stack, GitHub, Docker',
+  },
 
-// ---- Message Router -----------------------------------------
+  yearsOfExperience: 5,
+};
+
+// ── Original bullets (word counts are fixed — never change) ──
+const BULLETS = {
+  role1: [
+    { id: 'R1B1', words: 20, text: 'Designed event-driven microservices using Java, Spring Boot, and Apache Kafka, processing 50K+ daily order events and improving scalability by 40%' },
+    { id: 'R1B2', words: 17, text: 'Built asynchronous workflows for inventory validation, health monitoring, and audit logging, reducing order fulfillment latency by 30%' },
+    { id: 'R1B3', words: 16, text: 'Integrated backend services with warehouse automation systems (ASRS, conveyors, packing units), reducing retrieval failures by 25%' },
+    { id: 'R1B4', words: 15, text: 'Implemented retry, dead-letter queues (DLQ), and timeout recovery strategies for Kafka consumers, improving system resilience' },
+    { id: 'R1B5', words: 16, text: 'Designed REST APIs and internal event processors for real-time exception handling, reducing operational delays by 15%' },
+    { id: 'R1B6', words: 9,  text: 'Containerized microservices using Docker, enabling consistent and environment-independent deployments' },
+    { id: 'R1B7', words: 15, text: 'Automated CI/CD pipelines using Jenkins, reducing manual deployment effort and improving release reliability on servers' },
+  ],
+  role2: [
+    { id: 'R2B1', words: 16, text: 'Migrated legacy WMS modules to Java 17 and Spring MVC, improving system response time by 25%' },
+    { id: 'R2B2', words: 16, text: 'Designed modular RESTful APIs using Spring MVC, Hibernate, and DAO patterns for better separation of concerns' },
+    { id: 'R2B3', words: 15, text: 'Implemented data persistence using Spring Data JPA and Hibernate, optimizing entity mappings and query performance' },
+    { id: 'R2B4', words: 21, text: 'Implemented Spring AOP to unify application-wide logging, monitoring, and exception handling, enhancing maintainability and improving consistency across microservices and backend modules' },
+    { id: 'R2B5', words: 11, text: 'Integrated Jenkins-based CI/CD pipelines for automated build, testing, and artifact management' },
+    { id: 'R2B6', words: 12, text: 'Optimized complex SQL queries and improved execution paths, reducing overall database latency' },
+    { id: 'R2B7', words: 9,  text: 'Standardized application logging and monitoring using the ELK Stack' },
+    { id: 'R2B8', words: 7,  text: 'Dockerized applications to enable scalable, container-based deployments' },
+  ],
+};
+
+// ── Helpers ───────────────────────────────────────────────────
+
+// Pick the first keyword if alternatives are listed (e.g. "ReactJS / Angular" → "ReactJS")
+function pickKeyword(raw) {
+  return raw.split(/\s*[\/|,]\s*/)[0].trim();
+}
+
+// Count words the same way the AI should (hyphenated = 1 word)
+function countWords(text) {
+  return text.trim().split(/\s+/).length;
+}
+
+// ── Message Router ────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request.action === 'calculateMatchScore') {
-    handleCalculateMatchScore(request.data)
-      .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-  if (request.action === 'optimizeAndOutreach') {
-    handleOptimizeAndOutreach(request.data)
-      .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
+  const handlers = {
+    calculateMatchScore: () => handleMatchScore(request.data),
+    optimizeAndOutreach: () => handleOptimize(request.data),
+  };
+  const handler = handlers[request.action];
+  if (!handler) return false;
+  handler()
+    .then((r) => sendResponse(r))
+    .catch((e) => sendResponse({ success: false, error: e.message }));
+  return true;
 });
 
-// ---- Match Score Handler -------------------------------------
-async function handleCalculateMatchScore({ jobDescription, model, apiKey }) {
+// ── OpenAI Helper ─────────────────────────────────────────────
+async function callOpenAI({ apiKey, model, system, user, maxTokens = 1500 }) {
   if (!apiKey) throw new Error('OpenAI API key is not set.');
-  if (!jobDescription) throw new Error('No job description provided.');
-
-  const systemPrompt = `You are a resume matching expert. Analyze a job description against a candidate's work experience and skills, then provide a detailed match score justification from 0-100%.
-
-Consider:
-1. Technical skills match (languages, frameworks, tools, cloud services)
-2. Experience relevance (domain, responsibilities, achievements)
-3. Overall fit for the role
-
-Return ONLY valid JSON with:
-- "score": number (0-100)
-- "summary": string (1-2 sentences overall summary)
-- "matches": array of strings (what matches - skills, experience, etc.)
-- "gaps": array of strings (what's missing or doesn't match - required skills not present, experience gaps, etc.)
-- "justification": string (explain why this specific score is justified based on matches and gaps)`;
-
-  const userPrompt = `JOB DESCRIPTION:
-${jobDescription}
-
-CANDIDATE'S WORK EXPERIENCE:
-${MY_WORK_EXPERIENCE}
-
-CANDIDATE'S SKILLS:
-${MY_SKILLS}
-
-Calculate the job match score (0-100%) and provide a detailed breakdown:
-1. List all matching skills, technologies, and relevant experience
-2. List all gaps - missing required skills, technologies, or experience areas
-3. Explain why the score is justified based on the matches and gaps
-4. Candidate have only 5 years of experience so make sure to give the score based on the experience also`;
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: model || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 1000,
-      response_format: { type: 'json_object' }
-    })
+      model: model || DEFAULT_MODEL,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      temperature: 0.2,
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+    }),
   });
-
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData?.error?.message || `API returned status ${res.status}`);
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e?.error?.message || `OpenAI API error ${res.status}`);
   }
-
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Empty response from OpenAI API.');
-
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    throw new Error(`Failed to parse AI response: ${e.message}`);
-  }
-
-  const score = parsed.score;
-  if (typeof score !== 'number' || score < 0 || score > 100) {
-    throw new Error('Invalid score returned from AI (must be 0-100)');
-  }
-
-  return {
-    success: true,
-    score: Math.round(score),
-    summary: parsed.summary || 'Match score calculated based on skills and experience alignment.',
-    matches: Array.isArray(parsed.matches) ? parsed.matches : [],
-    gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
-    justification: parsed.justification || ''
-  };
+  const raw = data.choices?.[0]?.message?.content;
+  if (!raw) throw new Error('Empty response from OpenAI.');
+  try { return JSON.parse(raw); }
+  catch (e) { throw new Error(`JSON parse failed: ${e.message}`); }
 }
 
-// ---- Optimize Resume + Generate Outreach (single API call) --
-async function handleOptimizeAndOutreach({ jobDescription, jobUrl, model, apiKey }) {
-  if (!apiKey) throw new Error('OpenAI API key is not set.');
+// ════════════════════════════════════════════════════════════
+// STEP 1 — MATCH SCORE
+// ════════════════════════════════════════════════════════════
+async function handleMatchScore({ jobDescription, model, apiKey }) {
   if (!jobDescription) throw new Error('No job description provided.');
 
-  const systemPrompt = `You are an expert resume writer AND outreach copywriter. Do TWO things in one response:
+  const parsed = await callOpenAI({
+    apiKey, model,
+    maxTokens: 1200,
+    system: `You are a resume keyword analyzer.
 
-PART A — RESUME REWRITE
-Rewrite the candidate's resume sections to 100% match the job description.
+1. Extract every technical keyword from the job description.
+   Include: languages, frameworks, libraries, tools, platforms, methodologies.
+   Exclude: soft skills, years of experience, generic phrases.
+   Group alternatives as one entry with " / " between them: e.g. "ReactJS / Angular", "AWS / Azure / GCP".
 
-Rules:
-1. Keep company names, role titles, dates unchanged: "Warehouse Automation Client, Software Engineer | 10/2024 – Present | Fastenal India" and "Code Migration Suite, Software Developer | 01/2021 – 09/2024 | Fastenal India"
-2. Keep the warehouse automation context for Role 1 and code migration context for Role 2
-3. Role 1 must have EXACTLY 7 bullet points. Role 2 must have EXACTLY 8 bullet points
-4. Each bullet must have the EXACT word count specified (treat hyphenated words and acronyms as single words)
-5. In bullets ONLY: wrap technical terms, tools, languages, frameworks in **double asterisks**
-6. Use plain % for percentages. Start each bullet with a strong action verb
-7. CRITICAL: You MUST incorporate ALL key technologies, tools, and skills mentioned in the job description into the bullets — especially ones the candidate is currently missing (gaps). Weave them naturally into the warehouse/migration context. Every required/desired skill from the JD must appear in at least one bullet or in the skills section. Do NOT leave any JD technology out
+2. Compare each keyword against the candidate profile:
+   matched = candidate clearly has it
+   missing = candidate does not have it
 
-Word counts per bullet:
-Role 1 (7 bullets): 20, 17, 16, 15, 16, 9, 15
-Role 2 (8 bullets): 16, 16, 15, 21, 11, 12, 9, 7
+3. Score 0–100. Weight required skills more than preferred.
 
-Original bullets for structure reference:
-Role 1:
-1. (20w) Designed event-driven microservices using Java, Spring Boot, and Apache Kafka, processing 50K+ daily order events and improving scalability by 40%
-2. (17w) Built asynchronous workflows for inventory validation, health monitoring, and audit logging, reducing order fulfillment latency by 30%
-3. (16w) Integrated backend services with warehouse automation systems (ASRS, conveyors, packing units), reducing retrieval failures by 25%
-4. (15w) Implemented retry, dead-letter queues (DLQ), and timeout recovery strategies for Kafka consumers, improving system resilience
-5. (16w) Designed REST APIs and internal event processors for real-time exception handling, reducing operational delays by 15%
-6. (9w) Containerized microservices using Docker, enabling consistent and environment-independent deployments
-7. (15w) Automated CI/CD pipelines using Jenkins, reducing manual deployment effort and improving release reliability on servers
-Role 2:
-1. (16w) Migrated legacy WMS modules to Java 17 and Spring MVC, improving system response time by 25%
-2. (16w) Designed modular RESTful APIs using Spring MVC, Hibernate, and DAO patterns for better separation of concerns
-3. (15w) Implemented data persistence using Spring Data JPA and Hibernate, optimizing entity mappings and query performance
-4. (21w) Implemented Spring AOP to unify application-wide logging, monitoring, and exception handling, enhancing maintainability and improving consistency across microservices and backend modules.
-5. (11w) Integrated Jenkins-based CI/CD pipelines for automated build, testing, and artifact management
-6. (12w) Optimized complex SQL queries and improved execution paths, reducing overall database latency
-7. (9w) Standardized application logging and monitoring using the ELK Stack
-8. (7w) Dockerized applications to enable scalable, container-based deployments
-
-PART B — OUTREACH MESSAGES
-IMPORTANT: Use the NEW rewritten resume you just generated in Part A (summary, skills, role1_bullets, role2_bullets) as the candidate's current profile. Do NOT reference the original/old resume bullets — the rewritten ones ARE the candidate's experience now.
-The candidate is Ankur Rana. Job posting URL: ${jobUrl || '[job URL]'}
-
-Write three messages that sound like a real person — warm, confident, not salesy or robotic. Conversational professional tone. No buzzwords or clichés. Reference specific skills, achievements, and technologies from the NEW rewritten resume bullets.
-- cold_email: ~120-150 words. First line: "Subject: ...". Mention the specific role, why genuinely interested, 2-3 relevant items from the rewritten resume that connect to the role, include job URL. End with simple ask to chat.
-- recruiter_msg: ~80-100 words. Mention specific role, why it caught his eye, 1-2 strengths from the rewritten resume, include job URL, ask to connect.
-- hiring_manager_msg: ~80-100 words. More direct/technical. Reference something specific about the team/product from JD, connect to hands-on experience from the rewritten resume, include job URL.
+Candidate:
+${CANDIDATE.experience}
+${CANDIDATE.skills.languages}
+${CANDIDATE.skills.frameworks}
+(${CANDIDATE.yearsOfExperience} years experience)
 
 Return ONLY valid JSON:
 {
-  "summary": "professional summary (~30 words, start with 'Software Engineer with 4.8 years of experience', NO bold, plain text only)",
-  "skills_languages": "comma-separated languages relevant to job (plain text)",
-  "skills_frameworks": "comma-separated frameworks/tools relevant to job (plain text)",
-  "role1_bullets": ["exactly 7 strings with **bold** tech terms"],
-  "role2_bullets": ["exactly 8 strings with **bold** tech terms"],
-  "cold_email": "string",
-  "recruiter_msg": "string",
-  "hiring_manager_msg": "string"
-}`;
-
-  const userPrompt = `JOB DESCRIPTION:\n${jobDescription}\n\nJOB URL: ${jobUrl || '[not available]'}\n\nGenerate the optimized resume sections AND all three outreach messages in a single JSON response.`;
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: model || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.4,
-      max_tokens: 3500,
-      response_format: { type: 'json_object' }
-    })
+  "score": number,
+  "summary": "1-2 sentences",
+  "matched": ["keyword"],
+  "missing": ["keyword"],
+  "justification": "why this score"
+}`,
+    user: `JOB DESCRIPTION:\n${jobDescription}`,
   });
 
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData?.error?.message || `API returned status ${res.status}`);
-  }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Empty response from OpenAI API.');
-
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    throw new Error(`Failed to parse AI response: ${e.message}`);
-  }
-
-  if (!Array.isArray(parsed.role1_bullets) || parsed.role1_bullets.length !== 7) {
-    throw new Error('AI must return exactly 7 bullets for Role 1.');
-  }
-  if (!Array.isArray(parsed.role2_bullets) || parsed.role2_bullets.length !== 8) {
-    throw new Error('AI must return exactly 8 bullets for Role 2.');
-  }
-
-  const latex = buildResumeLatex({
-    summary: parsed.summary || 'Software Engineer with 4+ years of experience building scalable backend systems.',
-    skillsLanguages: parsed.skills_languages || 'Java, Python, SQL',
-    skillsFrameworks: parsed.skills_frameworks || 'Spring Boot, Docker',
-    role1Bullets: parsed.role1_bullets.map(formatBulletForLatex),
-    role2Bullets: parsed.role2_bullets.map(formatBulletForLatex)
-  });
-
+  if (typeof parsed.score !== 'number') throw new Error('Invalid score from AI.');
   return {
     success: true,
-    latex,
-    coldEmail: parsed.cold_email || '',
-    recruiterMsg: parsed.recruiter_msg || '',
-    hiringManagerMsg: parsed.hiring_manager_msg || ''
+    score: Math.round(parsed.score),
+    summary: parsed.summary || '',
+    matches: Array.isArray(parsed.matched) ? parsed.matched : [],
+    gaps: Array.isArray(parsed.missing) ? parsed.missing : [],
+    justification: parsed.justification || '',
   };
 }
 
-// ---- LaTeX Helpers ------------------------------------------
-function formatBulletForLatex(text) {
-  let result = text.replace(/\*\*([^*]+)\*\*/g, '\\textbf{$1}');
-  result = result.replace(/\\%/g, '%');
-  result = result.replace(/%/g, '\\%');
-  return result;
+// ════════════════════════════════════════════════════════════
+// STEP 2 — OPTIMIZE
+//
+// Strategy:
+//   - Parse gaps → deduplicate → pick first alternative each
+//   - Build a keyword map: { keyword: { done: false } }
+//   - Send ONE prompt that processes keywords ONE BY ONE:
+//       For keyword N:
+//         1. Add to skills (languages or frameworks)
+//         2. Pick the best bullet, swap words to keep same count, bold keyword
+//         3. Mark done
+//   - AI returns updated bullet array + updated skills + map
+//   - JS validates word counts and map completeness
+// ════════════════════════════════════════════════════════════
+async function handleOptimize({ jobDescription, jobUrl, model, apiKey, gaps }) {
+  if (!jobDescription) throw new Error('No job description provided.');
+
+  // Build clean keyword list — pick first alternative, deduplicate
+  const keywords = [...new Set(
+    (gaps || [])
+      .map(pickKeyword)
+      .filter(Boolean)
+  )];
+
+  if (keywords.length === 0) {
+    // No gaps — just bold existing tech terms and return
+    return buildResult({
+      summary: `Software Engineer with ${CANDIDATE.yearsOfExperience} years of experience in Java backend development.`,
+      skillsLanguages: CANDIDATE.skills.languages,
+      skillsFrameworks: CANDIDATE.skills.frameworks,
+      role1Bullets: BULLETS.role1.map((b) => b.text),
+      role2Bullets: BULLETS.role2.map((b) => b.text),
+      coldEmail: '', recruiterMsg: '', hiringManagerMsg: '',
+      keywordMap: {},
+    });
+  }
+
+  // Initial keyword tracking map
+  const initialMap = {};
+  keywords.forEach((kw) => { initialMap[kw] = { done: false, bullet: null }; });
+
+  // Format bullets for prompt with IDs and word counts
+  const formatBullets = (bullets) =>
+    bullets.map((b) => `  ${b.id} (${b.words}w): ${b.text}`).join('\n');
+
+  const parsed = await callOpenAI({
+    apiKey, model,
+    maxTokens: 4500,
+    system: `You are a resume keyword injector. Process keywords ONE BY ONE into a resume.
+
+════════════════════════════════════════
+KEYWORD MAP (process in this exact order)
+════════════════════════════════════════
+${keywords.map((kw, i) => `${i + 1}. "${kw}" — done: false`).join('\n')}
+
+════════════════════════════════════════
+CURRENT RESUME BULLETS
+════════════════════════════════════════
+
+Role 1 — Warehouse Automation Client (warehouse/automation context)
+${formatBullets(BULLETS.role1)}
+
+Role 2 — Code Migration Suite (code migration/backend context)
+${formatBullets(BULLETS.role2)}
+
+════════════════════════════════════════
+CURRENT SKILLS
+════════════════════════════════════════
+Languages: ${CANDIDATE.skills.languages}
+Frameworks & Tools: ${CANDIDATE.skills.frameworks}
+
+════════════════════════════════════════
+PROCESS — do this FOR EACH keyword in order
+════════════════════════════════════════
+
+For keyword N:
+
+  STEP A — Add to skills:
+    If it is a programming/scripting language → add to Languages
+    Otherwise → add to Frameworks & Tools
+    No duplicates.
+
+  STEP B — Inject into one bullet:
+    Pick the bullet where the keyword fits most naturally given the story context.
+    Each bullet can only receive ONE keyword. Do not reuse a bullet already used.
+    SWAP rule: replace a word or phrase in the bullet with the keyword.
+      The bullet word count MUST stay exactly the same after the swap.
+      Count words before and after — they must match exactly.
+      Hyphenated-words and acronyms count as 1 word each.
+      ✓ CORRECT: replace a word of same length — "internal" (1w) → "ReactJS-backed" (1w)
+      ✓ CORRECT: replace a 2-word phrase — "Apache Kafka" (2w) → "AWS Kafka" (2w)
+      ✓ CORRECT: replace a 3-word phrase — "order fulfillment latency" (3w) → "OAuth2-secured API latency" (3w)
+      ✗ HARD BAN: adding any word to the end of a bullet ("...by 30% using OAuth2") — FORBIDDEN, always breaks count
+      ✗ HARD BAN: adding any word to the middle without removing equal-length words — FORBIDDEN
+      ✗ HARD BAN: the word count label in the output (e.g. "R1B1 (20w):") must NOT appear in bullet text
+      If a keyword does not fit cleanly via swap, pick a different bullet where it does fit.
+    After injecting, wrap the keyword in **double asterisks**: **ReactJS**, **AWS**.
+    Also wrap ALL other existing tech terms in that bullet in **double asterisks**.
+
+  STEP C — Mark done:
+    Set done: true, bullet: "<bullet id>" in the keyword map.
+
+════════════════════════════════════════
+AFTER ALL KEYWORDS ARE PROCESSED
+════════════════════════════════════════
+- For bullets NOT modified: still wrap all tech terms in **double asterisks**.
+- Double-check every bullet word count matches the original exactly.
+- Double-check keyword_map shows done: true for every keyword.
+
+════════════════════════════════════════
+OUTREACH — after resume is done
+════════════════════════════════════════
+Candidate: Ankur Rana. Job URL: ${jobUrl || '[job URL]'}
+Use the updated bullets (not originals) as the basis.
+Tone: real, direct, no buzzwords, no "I am passionate about".
+
+cold_email (120–150 words): Subject line first. Role, 2–3 bullet references, job URL, ask to chat.
+recruiter_msg (80–100 words): Role, 1–2 strengths from bullets, job URL, ask to connect.
+hiring_manager_msg (80–100 words): Technical tone, reference JD + bullet experience, job URL.
+
+════════════════════════════════════════
+RETURN ONLY THIS JSON — no markdown
+════════════════════════════════════════
+{
+  "keyword_map": {
+    "ReactJS": { "done": true, "bullet": "R1B5", "skill_added_to": "frameworks" },
+    "AWS":     { "done": true, "bullet": "R1B1", "skill_added_to": "frameworks" }
+  },
+  "skills_languages": "Java, ...",
+  "skills_frameworks": "Spring Boot, ...",
+  "role1_bullets": ["7 strings — **bold** all tech terms, exact word counts preserved"],
+  "role2_bullets": ["8 strings — **bold** all tech terms, exact word counts preserved"],
+  "summary": "Software Engineer with 4.8 years of experience... (~30 words, plain text)",
+  "cold_email": "",
+  "recruiter_msg": "",
+  "hiring_manager_msg": ""
+}`,
+    user: `JOB DESCRIPTION:\n${jobDescription}\n\nKEYWORDS TO INJECT (in order):\n${keywords.map((k, i) => `${i + 1}. ${k}`).join('\n')}`,
+  });
+
+  // ── JS-side validation ──────────────────────────────────────
+
+  if (!Array.isArray(parsed.role1_bullets) || parsed.role1_bullets.length !== 7)
+    throw new Error(`Role 1 must have exactly 7 bullets — got ${parsed.role1_bullets?.length ?? 0}.`);
+  if (!Array.isArray(parsed.role2_bullets) || parsed.role2_bullets.length !== 8)
+    throw new Error(`Role 2 must have exactly 8 bullets — got ${parsed.role2_bullets?.length ?? 0}.`);
+
+  // Check word counts — log warnings for mismatches
+  const allOriginal = [...BULLETS.role1, ...BULLETS.role2];
+  const allReturned = [...parsed.role1_bullets, ...parsed.role2_bullets];
+  allOriginal.forEach((orig, i) => {
+    const returned = allReturned[i] || '';
+    // Strip **...** for word count (bold markers aren't words)
+    const clean = returned.replace(/\*\*/g, '');
+    const actual = countWords(clean);
+    if (actual !== orig.words) {
+      console.warn(`[ResumeOptimizer] Word count mismatch on ${orig.id}: expected ${orig.words}, got ${actual} — "${clean}"`);
+    }
+  });
+
+  // Check all keywords marked done
+  const map = parsed.keyword_map || {};
+  keywords.forEach((kw) => {
+    if (!map[kw]?.done) {
+      console.warn(`[ResumeOptimizer] Keyword not marked done in map: "${kw}"`);
+    }
+    // Also verify keyword actually appears in the bullets
+    const allBullets = allReturned.join(' ').toLowerCase();
+    if (!allBullets.includes(kw.toLowerCase())) {
+      console.warn(`[ResumeOptimizer] Keyword not found in any bullet: "${kw}"`);
+    }
+  });
+
+  return buildResult({
+    summary: parsed.summary || `Software Engineer with ${CANDIDATE.yearsOfExperience} years of experience in Java backend development.`,
+    skillsLanguages: parsed.skills_languages || CANDIDATE.skills.languages,
+    skillsFrameworks: parsed.skills_frameworks || CANDIDATE.skills.frameworks,
+    role1Bullets: parsed.role1_bullets,
+    role2Bullets: parsed.role2_bullets,
+    coldEmail: parsed.cold_email || '',
+    recruiterMsg: parsed.recruiter_msg || '',
+    hiringManagerMsg: parsed.hiring_manager_msg || '',
+    keywordMap: map,
+  });
 }
 
-function buildResumeLatex({ summary, skillsLanguages, skillsFrameworks, role1Bullets, role2Bullets }) {
-  const r1 = role1Bullets.map((b) => '  \\item ' + b).join('\n');
-  const r2 = role2Bullets.map((b) => '  \\item ' + b).join('\n');
+// ── Build final result object ─────────────────────────────────
+function buildResult({ summary, skillsLanguages, skillsFrameworks, role1Bullets, role2Bullets, coldEmail, recruiterMsg, hiringManagerMsg, keywordMap }) {
+  return {
+    success: true,
+    keywordMap,   // expose to UI so it can show done/pending per keyword
+    latex: buildLatex({
+      summary,
+      skillsLanguages,
+      skillsFrameworks,
+      role1Bullets: role1Bullets.map((b) => toLatex(stripMd(b))),
+      role2Bullets: role2Bullets.map((b) => toLatex(stripMd(b))),
+    }),
+    coldEmail,
+    recruiterMsg,
+    hiringManagerMsg,
+  };
+}
+
+// ── LaTeX Helpers ─────────────────────────────────────────────
+
+function toLatex(text) {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '\\textbf{$1}')
+    .replace(/(?<!\\)%/g, '\\%');
+}
+
+// Strip markdown bold (**word**) and bullet IDs (e.g. "R1B1 (20w): ") from plain text fields
+function stripMd(text) {
+  if (!text) return '';
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')          // **bold** → plain
+    .replace(/\bR[12]B\d+\s*\(\d+w\):\s*/g, ''); // R1B1 (20w): → removed
+}
+
+function esc(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '\\&')
+    .replace(/#/g, '\\#')
+    .replace(/\$/g, '\\$')
+    .replace(/_/g, '\\_');
+}
+
+function buildLatex({ summary, skillsLanguages, skillsFrameworks, role1Bullets, role2Bullets }) {
+  const r1 = role1Bullets.map((b) => `  \\item ${b}`).join('\n');
+  const r2 = role2Bullets.map((b) => `  \\item ${b}`).join('\n');
 
   return [
     '\\documentclass[11.9pt,a4paper]{article}',
-    '\\usepackage[left=15mm, right=15mm, top=18mm, bottom=10mm]{geometry}',
+    '\\usepackage[left=15mm, right=15mm, top=14mm, bottom=10mm]{geometry}',
     '\\usepackage{enumitem}',
     '\\usepackage{titlesec}',
     '\\usepackage[hidelinks]{hyperref}',
@@ -271,18 +408,14 @@ function buildResumeLatex({ summary, skillsLanguages, skillsFrameworks, role1Bul
     '\\setlength{\\parskip}{0pt}',
     '',
     '\\titlespacing{\\section}{0pt}{10pt}{5pt}',
-    '\\titleformat{\\section}',
-    '  {\\bfseries\\normalsize}',
-    '  {}{0em}{}',
-    '  [\\vspace{1pt}\\hrule\\vspace{6pt}]',
-    '',
+    '\\titleformat{\\section}{\\bfseries\\normalsize}{}{0em}{}[\\vspace{1pt}\\hrule\\vspace{6pt}]',
     '\\setlist[itemize]{leftmargin=1.5em, noitemsep, topsep=2pt, parsep=0pt, label=\\textbullet}',
     '',
     '\\begin{document}',
     '',
-    '% ── Header ──────────────────────────────────────────────────────────────────',
+    '% ── Header ──────────────────────────────────────────────',
     '\\begin{center}',
-    '  {\\Large \\textbf{Ankur Rana}}\\\\[7pt]',
+    `  {\\Large \\textbf{${CANDIDATE.name}}}\\\\[7pt]`,
     '  {\\small',
     '    \\Letter\\ ankur39rana@gmail.com \\enspace\\textbar\\enspace',
     '    \\phone\\ +91 7000346850 \\enspace\\textbar\\enspace',
@@ -292,21 +425,18 @@ function buildResumeLatex({ summary, skillsLanguages, skillsFrameworks, role1Bul
     '\\end{center}',
     '',
     '\\vspace{8pt}',
-    '',
-    summary,
-    '',
-    '',
+    esc(summary),
     '\\vspace{8pt}',
-    '% ── Skills ──────────────────────────────────────────────────────────────────',
-    '\\section*{SKILLS}',
     '',
+    '% ── Skills ──────────────────────────────────────────────',
+    '\\section*{SKILLS}',
     '\\noindent',
-    '\\textbf{Languages} --- ' + skillsLanguages + '\\\\[3pt]',
-    '\\textbf{Frameworks \\& Tools} --- ' + skillsFrameworks,
+    `\\textbf{Languages} --- ${esc(stripMd(skillsLanguages))}\\\\[3pt]`,
+    `\\textbf{Frameworks \\& Tools} --- ${esc(stripMd(skillsFrameworks))}`,
     '',
     '\\vspace{6pt}',
     '',
-    '% ── Experience ──────────────────────────────────────────────────────────────',
+    '% ── Experience ──────────────────────────────────────────',
     '\\section*{EXPERIENCE}',
     '',
     '\\noindent',
@@ -325,7 +455,7 @@ function buildResumeLatex({ summary, skillsLanguages, skillsFrameworks, role1Bul
     '',
     '\\vspace{6pt}',
     '',
-    '% ── Projects ────────────────────────────────────────────────────────────────',
+    '% ── Projects ────────────────────────────────────────────',
     '\\section*{PROJECTS}',
     '',
     '\\noindent',
@@ -346,7 +476,7 @@ function buildResumeLatex({ summary, skillsLanguages, skillsFrameworks, role1Bul
     '  \\item Designed gameplay mechanics including player movement, enemy spawning, and survival objectives',
     '\\end{itemize}',
     '',
-    '% ── Education ───────────────────────────────────────────────────────────────',
+    '% ── Education ───────────────────────────────────────────',
     '\\section*{EDUCATION}',
     '',
     '\\noindent',
@@ -357,9 +487,6 @@ function buildResumeLatex({ summary, skillsLanguages, skillsFrameworks, role1Bul
     '\\noindent',
     '\\textbf{Jiwaji University}, Bachelor of Computer Applications \\hfill 07/2015 -- 06/2018 | Gwalior, India',
     '',
-    '\\vspace{6pt}',
-    '',
-    '',
-    '\\end{document}'
+    '\\end{document}',
   ].join('\n');
 }
