@@ -35,24 +35,43 @@
         </div>
 
         <!-- Step 1: Single Start button -->
-        <div id="start-section" style="padding: 20px 0; text-align: center;">
-          <p style="color: #64748b; font-size: 13px; margin-bottom: 18px;">
+        <div id="start-section" style="padding: 20px 0; text-align: center">
+          <p style="color: #64748b; font-size: 13px; margin-bottom: 18px">
             Open a job posting in this tab, then click Start.
           </p>
-          <button id="btn-start" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 15px;">
-            <span class="btn-text">▶  Calculate Match Score</span>
+          <button id="btn-start" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 15px">
+            <span class="btn-text">▶ Calculate Match Score</span>
             <span class="spinner hidden"></span>
           </button>
         </div>
 
         <!-- Step 2: Score display (shown after success) -->
-        <div id="score-section" class="hidden" style="padding: 20px 0; text-align: center;">
-          <div style="margin-bottom: 20px;">
-            <div style="font-size: 48px; font-weight: bold; color: #4F46E5; margin-bottom: 8px;" id="score-value">--</div>
-            <div style="font-size: 18px; color: #64748b; margin-bottom: 20px;" id="score-label">Job Match Score</div>
-            <div style="font-size: 13px; color: #94a3b8; text-align: left; padding: 12px; background: #f1f5f9; border-radius: 6px; margin-top: 16px;" id="score-details"></div>
+        <div id="score-section" class="hidden" style="padding: 20px 0; text-align: center">
+          <div style="margin-bottom: 20px">
+            <div style="font-size: 48px; font-weight: bold; color: #4f46e5; margin-bottom: 8px" id="score-value">
+              --
+            </div>
+            <div style="font-size: 18px; color: #64748b; margin-bottom: 20px" id="score-label">Job Match Score</div>
+            <div
+              style="
+                font-size: 13px;
+                color: #94a3b8;
+                text-align: left;
+                padding: 12px;
+                background: #f1f5f9;
+                border-radius: 6px;
+                margin-top: 16px;
+              "
+              id="score-details"></div>
           </div>
-          <button id="btn-restart" class="btn btn-outline" style="width: 100%; padding: 11px;">
+          <button
+            id="btn-optimize"
+            class="btn btn-success hidden"
+            style="width: 100%; padding: 12px; font-size: 15px; margin-bottom: 10px">
+            <span class="btn-text">📄 Optimize & Download Resume</span>
+            <span class="spinner hidden"></span>
+          </button>
+          <button id="btn-restart" class="btn btn-outline" style="width: 100%; padding: 11px">
             ← Calculate Another Job
           </button>
         </div>

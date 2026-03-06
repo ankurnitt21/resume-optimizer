@@ -37,6 +37,7 @@ function initTabs() {
 // =============================================================
 function initOptimizeTab() {
   $('#btn-start').addEventListener('click', handleStart);
+  $('#btn-optimize').addEventListener('click', handleOptimize);
 
   $('#btn-restart').addEventListener('click', () => {
     extractedJD = '';
@@ -44,6 +45,7 @@ function initOptimizeTab() {
     $('#score-section').classList.add('hidden');
     $('#start-section').classList.remove('hidden');
     $('#status-bar').classList.add('hidden');
+    $('#btn-optimize').classList.add('hidden');
   });
 }
 
@@ -64,7 +66,9 @@ async function handleStart() {
     if (!tab?.id) throw new Error('No active tab found');
     try {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-    } catch { /* already injected or restricted page — continue */ }
+    } catch {
+      /* already injected or restricted page — continue */
+    }
 
     const extRes = await chrome.tabs.sendMessage(tab.id, { action: 'extractJobDescription' });
     if (!extRes?.success) throw new Error(extRes?.error || 'Could not extract job description');
@@ -91,37 +95,41 @@ async function handleStart() {
     // Display the score
     $('#score-value').textContent = `${matchScore}%`;
     $('#score-label').textContent = 'Job Match Score';
-    
+
     // Build detailed breakdown HTML
     let detailsHTML = '';
     if (summary) {
       detailsHTML += `<div style="margin-bottom: 12px; font-weight: 500; color: #334155;">${summary}</div>`;
     }
-    
+
     if (matches.length > 0) {
       detailsHTML += `<div style="margin-bottom: 12px;"><strong style="color: #059669;">✓ Matches:</strong><ul style="margin: 6px 0 0 0; padding-left: 20px; color: #64748b;">`;
-      matches.forEach(match => {
+      matches.forEach((match) => {
         detailsHTML += `<li style="margin-bottom: 4px;">${match}</li>`;
       });
       detailsHTML += `</ul></div>`;
     }
-    
+
     if (gaps.length > 0) {
       detailsHTML += `<div style="margin-bottom: 12px;"><strong style="color: #dc2626;">✗ Gaps:</strong><ul style="margin: 6px 0 0 0; padding-left: 20px; color: #64748b;">`;
-      gaps.forEach(gap => {
+      gaps.forEach((gap) => {
         detailsHTML += `<li style="margin-bottom: 4px;">${gap}</li>`;
       });
       detailsHTML += `</ul></div>`;
     }
-    
+
     if (justification) {
       detailsHTML += `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;"><strong style="color: #4F46E5;">Why ${matchScore}%?</strong><div style="margin-top: 6px; color: #64748b;">${justification}</div></div>`;
     }
-    
-    $('#score-details').innerHTML = detailsHTML || 'Match score calculated based on your skills and experience alignment.';
+
+    $('#score-details').innerHTML =
+      detailsHTML || 'Match score calculated based on your skills and experience alignment.';
 
     $('#start-section').classList.add('hidden');
     $('#score-section').classList.remove('hidden');
+    if (matchScore > 60) {
+      $('#btn-optimize').classList.remove('hidden');
+    }
     showStatus('success', 'Match score calculated!');
   } catch (err) {
     showStatus('error', err.message);
@@ -162,6 +170,52 @@ async function loadSettingsFromStorage() {
 async function getSettingsFromStorage() {
   const result = await chrome.storage.local.get('settings');
   return result.settings || null;
+}
+
+// =============================================================
+//  RESUME OPTIMIZATION
+// =============================================================
+async function handleOptimize() {
+  const settings = await getSettingsFromStorage();
+  if (!settings?.apiKey) {
+    showStatus('error', 'Please set your OpenAI API key in Settings.');
+    return;
+  }
+
+  setButtonLoading('#btn-optimize', true);
+  showStatus('info', 'Optimizing resume for this job… (~15s)');
+
+  try {
+    const result = await chrome.runtime.sendMessage({
+      action: 'optimizeResume',
+      data: {
+        jobDescription: extractedJD,
+        model: settings.model || 'gpt-4o-mini',
+        apiKey: settings.apiKey
+      }
+    });
+
+    if (!result?.success) throw new Error(result?.error || 'Resume optimization failed');
+
+    downloadTexFile(result.latex, 'resume.tex');
+    showStatus('success', 'Optimized resume downloaded!');
+  } catch (err) {
+    showStatus('error', err.message);
+  } finally {
+    setButtonLoading('#btn-optimize', false);
+  }
+}
+
+function downloadTexFile(content, filename) {
+  const blob = new Blob([content], { type: 'application/x-tex' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // =============================================================
