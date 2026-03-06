@@ -68,12 +68,37 @@
             id="btn-optimize"
             class="btn btn-success hidden"
             style="width: 100%; padding: 12px; font-size: 15px; margin-bottom: 10px">
-            <span class="btn-text">📄 Optimize & Download Resume</span>
+            <span class="btn-text">� Optimize Resume & Generate Outreach</span>
             <span class="spinner hidden"></span>
           </button>
           <button id="btn-restart" class="btn btn-outline" style="width: 100%; padding: 11px">
             ← Calculate Another Job
           </button>
+        </div>
+
+        <!-- Step 3: Outreach messages -->
+        <div id="outreach-section" class="hidden" style="padding: 10px 0">
+          <div class="outreach-card">
+            <div class="outreach-header">
+              <span class="outreach-label">📧 Cold Email</span>
+              <button class="btn-copy" data-target="cold-email-content">Copy</button>
+            </div>
+            <pre class="outreach-body" id="cold-email-content"></pre>
+          </div>
+          <div class="outreach-card">
+            <div class="outreach-header">
+              <span class="outreach-label">💬 Message to Recruiter</span>
+              <button class="btn-copy" data-target="recruiter-msg-content">Copy</button>
+            </div>
+            <pre class="outreach-body" id="recruiter-msg-content"></pre>
+          </div>
+          <div class="outreach-card">
+            <div class="outreach-header">
+              <span class="outreach-label">👤 Message to Hiring Manager</span>
+              <button class="btn-copy" data-target="hiring-msg-content">Copy</button>
+            </div>
+            <pre class="outreach-body" id="hiring-msg-content"></pre>
+          </div>
         </div>
       </section>
 

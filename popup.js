@@ -5,6 +5,7 @@
 // ---- State --------------------------------------------------
 let extractedJD = '';
 let matchScore = null;
+let jobPageUrl = '';
 
 // ---- DOM refs -----------------------------------------------
 const $ = (s) => document.querySelector(s);
@@ -37,12 +38,14 @@ function initTabs() {
 // =============================================================
 function initOptimizeTab() {
   $('#btn-start').addEventListener('click', handleStart);
-  $('#btn-optimize').addEventListener('click', handleOptimize);
+  $('#btn-optimize').addEventListener('click', handleOptimizeAndOutreach);
 
   $('#btn-restart').addEventListener('click', () => {
     extractedJD = '';
     matchScore = null;
+    jobPageUrl = '';
     $('#score-section').classList.add('hidden');
+    $('#outreach-section').classList.add('hidden');
     $('#start-section').classList.remove('hidden');
     $('#status-bar').classList.add('hidden');
     $('#btn-optimize').classList.add('hidden');
@@ -70,6 +73,7 @@ async function handleStart() {
       /* already injected or restricted page — continue */
     }
 
+    jobPageUrl = tab.url || '';
     const extRes = await chrome.tabs.sendMessage(tab.id, { action: 'extractJobDescription' });
     if (!extRes?.success) throw new Error(extRes?.error || 'Could not extract job description');
     extractedJD = extRes.text;
@@ -173,9 +177,9 @@ async function getSettingsFromStorage() {
 }
 
 // =============================================================
-//  RESUME OPTIMIZATION
+//  OPTIMIZE RESUME + OUTREACH (single AI call)
 // =============================================================
-async function handleOptimize() {
+async function handleOptimizeAndOutreach() {
   const settings = await getSettingsFromStorage();
   if (!settings?.apiKey) {
     showStatus('error', 'Please set your OpenAI API key in Settings.');
@@ -183,22 +187,24 @@ async function handleOptimize() {
   }
 
   setButtonLoading('#btn-optimize', true);
-  showStatus('info', 'Optimizing resume for this job… (~15s)');
+  showStatus('info', 'Optimizing resume & generating outreach… (~15s)');
 
   try {
     const result = await chrome.runtime.sendMessage({
-      action: 'optimizeResume',
+      action: 'optimizeAndOutreach',
       data: {
         jobDescription: extractedJD,
+        jobUrl: jobPageUrl,
         model: settings.model || 'gpt-4o-mini',
         apiKey: settings.apiKey
       }
     });
 
-    if (!result?.success) throw new Error(result?.error || 'Resume optimization failed');
+    if (!result?.success) throw new Error(result?.error || 'Optimization failed');
 
     downloadTexFile(result.latex, 'resume.tex');
-    showStatus('success', 'Optimized resume downloaded!');
+    renderOutreach(result);
+    showStatus('success', 'Resume downloaded & outreach messages ready!');
   } catch (err) {
     showStatus('error', err.message);
   } finally {
@@ -216,6 +222,28 @@ function downloadTexFile(content, filename) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function renderOutreach({ coldEmail, recruiterMsg, hiringManagerMsg }) {
+  $('#outreach-section').classList.remove('hidden');
+  $('#cold-email-content').textContent = coldEmail;
+  $('#recruiter-msg-content').textContent = recruiterMsg;
+  $('#hiring-msg-content').textContent = hiringManagerMsg;
+
+  // wire copy buttons
+  $$('.btn-copy').forEach((btn) => {
+    btn.onclick = () => {
+      const target = btn.dataset.target;
+      const text = $(`#${target}`).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+          btn.textContent = orig;
+        }, 1500);
+      });
+    };
+  });
 }
 
 // =============================================================

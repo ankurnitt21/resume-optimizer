@@ -35,8 +35,8 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
-  if (request.action === 'optimizeResume') {
-    handleOptimizeResume(request.data)
+  if (request.action === 'optimizeAndOutreach') {
+    handleOptimizeAndOutreach(request.data)
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -123,27 +123,30 @@ Calculate the job match score (0-100%) and provide a detailed breakdown:
   };
 }
 
-// ---- Resume Optimization Handler ----------------------------
-async function handleOptimizeResume({ jobDescription, model, apiKey }) {
+// ---- Optimize Resume + Generate Outreach (single API call) --
+async function handleOptimizeAndOutreach({ jobDescription, jobUrl, model, apiKey }) {
   if (!apiKey) throw new Error('OpenAI API key is not set.');
   if (!jobDescription) throw new Error('No job description provided.');
 
-  const systemPrompt = `You are an expert resume writer. Rewrite the candidate's resume to be a 100% match with the given job description.
+  const systemPrompt = `You are an expert resume writer AND outreach copywriter. Do TWO things in one response:
 
-RULES:
+PART A — RESUME REWRITE
+Rewrite the candidate's resume sections to 100% match the job description.
+
+Rules:
 1. Keep company names, role titles, dates unchanged: "Warehouse Automation Client, Software Engineer | 10/2024 – Present | Fastenal India" and "Code Migration Suite, Software Developer | 01/2021 – 09/2024 | Fastenal India"
 2. Keep the warehouse automation context for Role 1 and code migration context for Role 2
 3. Role 1 must have EXACTLY 7 bullet points. Role 2 must have EXACTLY 8 bullet points
 4. Each bullet must have the EXACT word count specified (treat hyphenated words and acronyms as single words)
 5. In bullets ONLY: wrap technical terms, tools, languages, frameworks in **double asterisks**
 6. Use plain % for percentages. Start each bullet with a strong action verb
-7. Include technologies and skills from the job description naturally in the bullets
+7. CRITICAL: You MUST incorporate ALL key technologies, tools, and skills mentioned in the job description into the bullets — especially ones the candidate is currently missing (gaps). Weave them naturally into the warehouse/migration context. Every required/desired skill from the JD must appear in at least one bullet or in the skills section. Do NOT leave any JD technology out
 
-WORD COUNTS PER BULLET:
+Word counts per bullet:
 Role 1 (7 bullets): 20, 17, 16, 15, 16, 9, 15
 Role 2 (8 bullets): 16, 16, 15, 21, 11, 12, 9, 7
 
-ORIGINAL BULLETS FOR STRUCTURE REFERENCE:
+Original bullets for structure reference:
 Role 1:
 1. (20w) Designed event-driven microservices using Java, Spring Boot, and Apache Kafka, processing 50K+ daily order events and improving scalability by 40%
 2. (17w) Built asynchronous workflows for inventory validation, health monitoring, and audit logging, reducing order fulfillment latency by 30%
@@ -152,7 +155,6 @@ Role 1:
 5. (16w) Designed REST APIs and internal event processors for real-time exception handling, reducing operational delays by 15%
 6. (9w) Containerized microservices using Docker, enabling consistent and environment-independent deployments
 7. (15w) Automated CI/CD pipelines using Jenkins, reducing manual deployment effort and improving release reliability on servers
-
 Role 2:
 1. (16w) Migrated legacy WMS modules to Java 17 and Spring MVC, improving system response time by 25%
 2. (16w) Designed modular RESTful APIs using Spring MVC, Hibernate, and DAO patterns for better separation of concerns
@@ -163,16 +165,28 @@ Role 2:
 7. (9w) Standardized application logging and monitoring using the ELK Stack
 8. (7w) Dockerized applications to enable scalable, container-based deployments
 
+PART B — OUTREACH MESSAGES
+IMPORTANT: Use the NEW rewritten resume you just generated in Part A (summary, skills, role1_bullets, role2_bullets) as the candidate's current profile. Do NOT reference the original/old resume bullets — the rewritten ones ARE the candidate's experience now.
+The candidate is Ankur Rana. Job posting URL: ${jobUrl || '[job URL]'}
+
+Write three messages that sound like a real person — warm, confident, not salesy or robotic. Conversational professional tone. No buzzwords or clichés. Reference specific skills, achievements, and technologies from the NEW rewritten resume bullets.
+- cold_email: ~120-150 words. First line: "Subject: ...". Mention the specific role, why genuinely interested, 2-3 relevant items from the rewritten resume that connect to the role, include job URL. End with simple ask to chat.
+- recruiter_msg: ~80-100 words. Mention specific role, why it caught his eye, 1-2 strengths from the rewritten resume, include job URL, ask to connect.
+- hiring_manager_msg: ~80-100 words. More direct/technical. Reference something specific about the team/product from JD, connect to hands-on experience from the rewritten resume, include job URL.
+
 Return ONLY valid JSON:
 {
-  "summary": "professional summary (~30 words, start with 'Software Engineer with 4+ years of experience', NO bold markers, plain text only)",
-  "skills_languages": "comma-separated languages relevant to job (NO bold, plain text)",
-  "skills_frameworks": "comma-separated frameworks/tools relevant to job (NO bold, plain text)",
-  "role1_bullets": ["exactly 7 strings with **bold** tech terms, matching word counts: 20,17,16,15,16,9,15"],
-  "role2_bullets": ["exactly 8 strings with **bold** tech terms, matching word counts: 16,16,15,21,11,12,9,7"]
+  "summary": "professional summary (~30 words, start with 'Software Engineer with 4.8 years of experience', NO bold, plain text only)",
+  "skills_languages": "comma-separated languages relevant to job (plain text)",
+  "skills_frameworks": "comma-separated frameworks/tools relevant to job (plain text)",
+  "role1_bullets": ["exactly 7 strings with **bold** tech terms"],
+  "role2_bullets": ["exactly 8 strings with **bold** tech terms"],
+  "cold_email": "string",
+  "recruiter_msg": "string",
+  "hiring_manager_msg": "string"
 }`;
 
-  const userPrompt = `JOB DESCRIPTION:\n${jobDescription}\n\nRewrite ALL resume sections to perfectly match this job. Follow ALL constraints exactly.`;
+  const userPrompt = `JOB DESCRIPTION:\n${jobDescription}\n\nJOB URL: ${jobUrl || '[not available]'}\n\nGenerate the optimized resume sections AND all three outreach messages in a single JSON response.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -183,8 +197,8 @@ Return ONLY valid JSON:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: 0.3,
-      max_tokens: 2500,
+      temperature: 0.4,
+      max_tokens: 3500,
       response_format: { type: 'json_object' }
     })
   });
@@ -220,7 +234,13 @@ Return ONLY valid JSON:
     role2Bullets: parsed.role2_bullets.map(formatBulletForLatex)
   });
 
-  return { success: true, latex };
+  return {
+    success: true,
+    latex,
+    coldEmail: parsed.cold_email || '',
+    recruiterMsg: parsed.recruiter_msg || '',
+    hiringManagerMsg: parsed.hiring_manager_msg || ''
+  };
 }
 
 // ---- LaTeX Helpers ------------------------------------------
